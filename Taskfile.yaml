@@ -1,0 +1,24 @@
+version: '3'
+
+tasks:
+  default:
+    cmds: [task --list]
+  tools:
+    desc: Build the Docker image with the compiler and checks
+    cmds: [bash scripts/build.sh --tools-only]
+  check:
+    desc: Lint, test release metadata, and test Linux extraction inside Docker
+    cmds: [bash scripts/check.sh]
+  build:
+    desc: Cross-compile macOS arm64 in Docker using the local Apple SDK
+    cmds: [bash scripts/build.sh]
+  smoke:
+    desc: Test the macOS binary on this Apple Silicon Mac
+    cmds: [python3 scripts/smoke.py .build/macos/unrar]
+  release:package:
+    desc: Sign, notarize, staple, and generate cask metadata (TAG=vVERSION)
+    requires:
+      vars: [TAG]
+    env:
+      RELEASE_TAG: '{{.TAG}}'
+    cmds: [bash scripts/sign-notarize.sh "$RELEASE_TAG"]

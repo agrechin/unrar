@@ -110,6 +110,13 @@ cask follows the supplied version, including beta releases. There is no silent
 promotion of beta source to a stable release. A manually dispatched `Release`
 workflow accepts an existing tag as well.
 
+For manual dispatch, select that same tag as the workflow ref so it is allowed
+by the release environment's tag policy:
+
+```sh
+gh workflow run release.yml --repo agrechin/unrar --ref v7.30.0-beta.1 -f tag=v7.30.0-beta.1
+```
+
 The release workflow:
 
 1. Checks tooling and extraction, then builds ARM64 in Docker.

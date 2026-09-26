@@ -1,0 +1,33 @@
+name: Prepare release
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: Full commit SHA on main with passing CI
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: unrar-prepare-release
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Validate tested source, create tag, and start Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_COMMIT: ${{ inputs.commit }}
+        run: python3 scripts/prepare-release.py "$SOURCE_COMMIT"

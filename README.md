@@ -1,13 +1,13 @@
 # UnRAR for Apple Silicon
 
-Build RARLAB's stable UnRAR source in Docker, sign and notarize on macOS,
-and publish a Homebrew cask in [`agrechin/homebrew-tap`](https://github.com/agrechin/homebrew-tap).
-This is an independent build and distribution of UnRAR, not an official RARLAB release.
+Build, test, sign, notarize, and publish UnRAR entirely in GitHub Actions.
+All jobs use GitHub-hosted runners; no local build tools or self-hosted machines
+are required. This is an independent build and distribution, not an official
+RARLAB release.
 
-The current source is **stable 7.23** (`7.23.0` for release tags).
 The target is **macOS 12 or later, Apple Silicon only**. Intel is not supported.
-The deployment target is checked in the build configuration; the minimum OS
-still needs testing on an actual macOS 12 machine.
+CI verifies the linked minimum OS and runs extraction tests on current macOS;
+compatibility still needs testing on an actual macOS 12 machine.
 
 After the first signed release has been published:
 
@@ -16,86 +16,55 @@ brew install --cask agrechin/tap/unrar
 unrar x archive.rar
 ```
 
-No release is created by a normal push to `main`.
-Signing, notarization, and publication are supported only through the GitHub
-`Release` workflow. Local commands provide checks and unsigned builds.
+## Operate from GitHub
 
-## Repository layout
+Use the repository's [Actions tab](https://github.com/agrechin/unrar/actions):
 
-- `vendor/unrar/` — the complete, unmodified RARLAB source, makefile, and licenses.
-- `upstream.json` — upstream URL, archive hash, version, and file hashes relative
-  to `vendor/unrar/`.
-- `scripts/`, `docker/`, `.github/` — our build and release tooling.
-- `tests/` — release-tooling tests and extraction fixtures.
+| Workflow | Trigger | Result |
+| --- | --- | --- |
+| CI | Pull request, push to `main`, or **Run workflow** | Linux checks plus a native arm64 build and extraction tests on macOS; an unsigned artifact for inspection |
+| Update upstream | **Run workflow** on `main`, with a stable RARLAB archive URL and expected SHA-256 | Imports the source, opens a PR, and explicitly dispatches CI on its branch |
+| Prepare release | **Run workflow** on `main`, with a full commit SHA from passing CI on `main` | Verifies stable source and both CI jobs, creates the version tag, and dispatches Release |
+| Release | Version tag push or dispatch on that tag | Checks, builds, signs, notarizes, tests the DMG, publishes a GitHub release, and updates Homebrew |
 
-For the next upstream release, follow [the upgrade guide](docs/upgrading.md).
-It includes the import command, validation, tagging, and the current limits on
-multiple-version support. Each tag has its own GitHub release; the Homebrew tap
-currently exposes a single `unrar` cask updated by each publication.
+Normal pushes and upstream-update PRs do not publish releases. Review and merge
+the update, wait for CI on `main`, and then use **Prepare release**. See the
+[upgrade guide](docs/upgrading.md) for the browser-only procedure and recovery.
 
-## Build and test
+## Build design
 
-Host prerequisites: an Apple Silicon Mac, Docker with a running local Linux
-engine, and Xcode Command Line Tools with **macOS SDK 26.5**. Task is an optional
-command wrapper. Compiler, linker, Linux build dependencies, ShellCheck, Ruby,
-and Python checks are installed inside Docker.
+Linux checks run on `ubuntu-24.04` in the repository's Docker image: source
+verification, ShellCheck, actionlint, Python tests, cask syntax, Linux compilation,
+and RAR4/RAR5 extraction tests. The image uses digest-pinned Ubuntu 26.04 and LLVM
+21; packages are resolved when the image is built.
 
-```sh
-bash scripts/check.sh                 # Linux compile, extraction tests, tooling checks
-bash scripts/build.sh                 # macOS arm64 cross-build
-python3 scripts/smoke.py .build/macos/unrar
-```
+The macOS job uses GitHub's `macos-26` arm64 runner, explicitly selects **Xcode
+26.5 and SDK 26.5**, and builds natively with Apple Clang and the upstream
+makefile. It does not use Docker or copy the Apple SDK. The same build script
+and smoke tests run in CI and Release. A missing selected toolchain fails the
+build instead of silently selecting another version.
 
-Equivalent commands: `task check`, `task build`, `task smoke`.
-Local commands and CI invoke the same scripts. To run checks and the macOS build
-together, use `bash scripts/build.sh --with-checks`; this prepares the Docker
-image once. The release workflow uses this combined command.
-The output is `.build/macos/unrar`. This local build is not Developer ID signed
-or notarized; distribution goes through the release workflow below.
+`build-info.json` records the upstream archive and source checksums, actual SDK,
+compiler, Xcode and runner image versions, linked minimum OS, and unsigned binary
+checksum. Hosted images receive updates, so builds are not claimed to be
+byte-for-byte reproducible. Release validation rejects changed source or binary
+bytes before signing. The complete RARLAB source and licenses stay unmodified
+in `vendor/unrar/`.
 
-The image uses digest-pinned Ubuntu 26.04 and LLVM 21. Dependency packages are
-resolved from Ubuntu when the image is first built; builds are not claimed to
-be byte-for-byte reproducible. `build-info.json` records source file checksums,
-the SDK, compiler version, deployment target, unsigned executable checksum, and
-upstream provenance. Both checks and builds verify the vendored source against
-the file checksums in `upstream.json`.
+Repository scripts are CI entrypoints. Contributors who already have the tools
+can optionally run `bash scripts/check.sh` with Docker, or `bash scripts/build.sh`
+on Apple Silicon with Xcode 26.5. Neither is required to operate this repository.
+Task is only an optional command wrapper.
 
-The SDK defaults to `xcrun --sdk macosx26.5 --show-sdk-path`. To select another
-compatible, locally installed SDK:
+## One-time GitHub setup
 
-```sh
-MACOS_SDK_PATH=/absolute/path/to/MacOSX26.5.sdk bash scripts/build.sh
-```
-
-LLVM 21 cannot read the new `arm64e.x1` stubs in SDK 27. Use SDK 26.5 until the
-container toolchain has been updated and verified. The build stages a temporary
-SDK copy under ignored `.build/` because Docker Desktop does not share `/Library`
-by default. It removes that copy on exit. The SDK and source are mounted read-only;
-compilation runs without network access. The Docker image contains no Apple SDK,
-source, certificates, or private keys. Follow Apple's SDK license terms for the
-SDK you install; it is never checked in or uploaded as a CI artifact.
-
-## Release runner and credentials
-
-CI uses GitHub-hosted Linux runners for pull requests. Releases use a dedicated
-**self-hosted Apple Silicon Mac** with these runner labels:
-
-```text
-self-hosted, macOS, ARM64, unrar-release
-```
-
-Install Docker and the SDK on that Mac, register it with `agrechin/unrar`, and
-keep its Docker engine running while jobs execute. `codesign`, `security`,
-`hdiutil`, `spctl`, `xcrun notarytool`, and Python 3 must be available to the runner
-account. Apple's native signing tools run on the host; compilation runs in Docker.
-An optional repository variable `MACOS_SDK_PATH` selects the installed SDK path.
-
-Use a dedicated runner account/host for release work. This is a public repository:
-never enable pull-request execution on the signing runner. The provided CI workflow
-runs PR code only on disposable GitHub-hosted Linux machines.
-
-Create a GitHub environment named **`release`**, restrict it to release tags, and
-add these secrets (names match the existing Freda release setup):
+1. Enable GitHub Actions. Under **Settings → Actions → General → Workflow
+   permissions**, enable **Allow GitHub Actions to create and approve pull
+   requests** so Update upstream can create its PR. Workflows declare their
+   required permissions explicitly; the repository default can remain read-only.
+2. Protect `main` and require the CI jobs **check** and **macos** before merging.
+3. Create an environment named **`release`**, restrict deployment to `v*` tags,
+   and configure the secrets below. Required reviewers can be used if desired.
 
 | Secret | Value |
 | --- | --- |
@@ -106,94 +75,66 @@ add these secrets (names match the existing Freda release setup):
 | `MACOS_NOTARY_ISSUER_ID` | API issuer ID |
 | `HOMEBREW_TAP_TOKEN` | Fine-grained GitHub token with Contents read/write on `agrechin/homebrew-tap` |
 
-Use GitHub's secret UI or `gh secret set --env release --repo agrechin/unrar`;
-never commit these values. GitHub cannot copy an existing repository secret's
-value back out of Freda, so the original values must be provisioned separately.
-The built-in GitHub token publishes releases to this public source repository;
-no separate `RELEASE_TOKEN` is needed.
+Provision these through GitHub's environment secret UI. Existing secrets cannot
+be copied back out of another repository; their original values are needed.
+There is no runner to register and no `MACOS_SDK_PATH` variable to configure.
+Apple credentials are still required for distribution, even though all build
+and signing tools run in CI. Never commit SDKs, keys, P12 files, or keychains.
 
-The signing script imports the P12 into a temporary keychain, explicitly selects
-a valid Developer ID Application identity, and removes the keychain and temporary
-private-key files on exit. It does not change the login keychain search list.
+CI runs without signing secrets. Only Release uses the `release` environment.
+The signing script imports the P12 into a temporary keychain, requires exactly
+one valid Developer ID Application identity, and removes temporary key material
+on exit. Hosted runners are discarded after each job.
 
-## Publish
+## Release and recovery
 
-After the runner and environment secrets are configured, tag the reviewed source:
+Prepare release accepts only a full SHA reachable from `main` whose latest push
+CI run passed both Linux and macOS jobs. It derives the tag from `version.hpp`,
+requires `RARVER_BETA=0`, and never moves an existing tag. A matching tag can be
+reused if dispatch failed before a release was created. GitHub's built-in token
+does not trigger push workflows when it creates a tag, so preparation explicitly
+dispatches Release on that tag.
 
-```sh
-git tag -a v7.23.0 -m 'UnRAR 7.23'
-git push origin v7.23.0
-```
+Release runs Linux checks, builds and tests the unsigned arm64 binary, signs it
+with hardened runtime and a secure timestamp, creates and signs a DMG, and
+submits it to Apple. It requires **Accepted**, staples and validates the ticket,
+runs Gatekeeper assessment, mounts the DMG, and tests its packaged binary.
+The final DMG checksum is used for the Homebrew cask. The publisher verifies
+downloaded release bytes before updating only `Casks/unrar.rb` in the tap.
 
-The tag must match `vendor/unrar/version.hpp`, and `RARVER_BETA` must be zero.
-The release preflight rejects beta source even if its tag matches. Casks accept stable
-versions only. A manually dispatched `Release` workflow accepts an existing
-stable tag as well.
-
-For manual dispatch, select that same tag as the workflow ref so it is allowed
-by the release environment's tag policy:
-
-```sh
-gh workflow run release.yml --repo agrechin/unrar --ref v7.23.0 -f tag=v7.23.0
-```
-
-The release workflow:
-
-1. Validates the release context, stable source, tag, and required credentials
-   using the shared preflight in `scripts/release.py`; checks tooling and
-   extraction, then builds ARM64 in Docker with one image-preparation step.
-2. Checks source and binary hashes to reject stale build output.
-3. Signs the executable with hardened runtime and a secure timestamp.
-4. Creates and signs a DMG containing `unrar`, the original license,
-   acknowledgements, and build metadata.
-5. Submits it to Apple with `notarytool`, requires **Accepted**, staples the
-   ticket, validates it, and runs Gatekeeper assessment.
-6. Mounts the final DMG read-only and tests the packaged binary.
-7. Hashes the final stapled DMG and generates the cask using that SHA-256.
-8. Publishes the GitHub release, verifies the downloaded release bytes, then
-   updates only `Casks/unrar.rb` in the tap with a readback check.
-
-The cask uses Homebrew's `binary` artifact, with ARM64 and minimum-macOS
+The cask uses Homebrew's `binary` artifact with arm64 and minimum-macOS
 constraints. It never strips quarantine or bypasses Gatekeeper. DMGs support
-stapling; a standalone command-line executable does not carry a stapled ticket.
+stapling; standalone command-line executables do not carry a stapled ticket.
 
-If publication succeeds but the tap update fails, use **Re-run failed jobs** so
-the publisher reuses the same signed artifact. Already-published bytes are never
-overwritten. Rebuilding and signing produces a different DMG; do not rerun all
-jobs to replace an existing release. Artifacts are retained for 14 days. A failed
-or timed-out notarization cannot publish; use its submission ID to investigate
-with `notarytool` before retrying.
+If publication succeeds but the tap update fails, use **Re-run failed jobs** in
+the original Release run. This reuses its signed artifact. Never rerun all jobs
+or Prepare release to replace published bytes: rebuilding/signing produces a
+different DMG. Signed workflow artifacts are retained for 14 days.
 
-The signing and publishing entrypoints reject calls outside this repository's
-GitHub `Release` workflow on the matching tag. There is no local release command.
-Signing/notarization must be validated with real credentials before claiming
-that a release is ready.
+If preparation creates a tag but dispatch fails, retry preparation for the same
+commit, or manually run **Release**, selecting the tag both in the **Use workflow
+from** selector and the `tag` input. Do not select `main` for Release. A failed or
+timed-out notarization cannot publish; inspect the submission ID and Apple log
+before retrying. Signing and publication reject local execution.
+
+An unsigned CI pass does not verify Apple credentials or prove that a signed
+release is ready. Validate signing and notarization in a real Release run.
 
 ## Upstream and licenses
 
-The 159 upstream files in [`vendor/unrar/`](vendor/unrar/), including the `makefile`
-and licenses, are imported without modification from the official
-[stable source archive](https://www.rarlab.com/rar/unrarsrc-7.2.7.tar.gz).
-The archive filename is `7.2.7`, while its `version.hpp` declares stable **7.23**.
-[RARLAB's general source link](https://www.rarlab.com/rar_add.htm) can point to a
-beta, so it is not used as an unversioned download source for this repository.
+[`upstream.json`](upstream.json) is the authoritative record of the current
+stable source version, exact RARLAB archive URL, archive SHA-256, and every
+vendored file checksum. Do not infer the application version from the archive
+filename: the imported `unrarsrc-7.2.7.tar.gz`, for example, declares UnRAR 7.23.
+[RARLAB's general download page](https://www.rarlab.com/rar_add.htm) can point to
+a beta; imports use an exact versioned stable source archive instead.
 
-[`upstream.json`](upstream.json) records the URL, archive SHA-256, version, and
-individual file checksums. The downloaded archive's verified SHA-256 is:
+UnRAR is source-available freeware governed by
+[`license.txt`](vendor/unrar/license.txt), including its restriction on developing
+a RAR-compatible archiver or recreating RAR compression. It is not MIT-licensed.
+See [`acknow.txt`](vendor/unrar/acknow.txt) for included components. Extraction
+fixtures retain their separate libarchive license.
 
-```text
-01d903a7dcf413cb2925696d7796e48e38d471f79bfe7ef3ad2aebf6c12dbefd
-```
-
-For an upstream update, use `scripts/import-upstream.py` to replace the complete
-snapshot and regenerate the manifest. Follow the [upgrade guide](docs/upgrading.md)
-for the exact download, import, validation, and publication steps.
-
-UnRAR is source-available freeware governed by [`license.txt`](vendor/unrar/license.txt),
-including its restriction on developing a RAR-compatible archiver or recreating
-RAR compression. It is not MIT-licensed. See [`acknow.txt`](vendor/unrar/acknow.txt)
-for included components. Extraction fixtures retain their separate libarchive license.
-
-References: [Clang cross-compilation](https://clang.llvm.org/docs/CrossCompilation.html),
+References: [GitHub macOS runner software](https://github.com/actions/runner-images/blob/main/images/macos/macos-26-arm64-Readme.md),
 [Apple notarization](https://developer.apple.com/documentation/security/customizing-the-notarization-workflow),
 [Homebrew Cask](https://docs.brew.sh/Cask-Cookbook).

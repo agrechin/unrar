@@ -72,7 +72,7 @@ def main():
     except (OSError, ValueError, KeyError, tarfile.TarError) as error:
         parser.exit(1, f"Import failed: {error}\n")
     print(f"Imported UnRAR {current} into {SOURCE_DIR}; updated upstream.json.")
-    print("Review the diff, update README.md, and run the checks in docs/upgrading.md.")
+    print("Review the source and license diff, then follow the CI workflow in docs/upgrading.md.")
 
 
 if __name__ == "__main__":

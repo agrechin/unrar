@@ -3,14 +3,11 @@ version: '3'
 tasks:
   default:
     cmds: [task --list]
-  tools:
-    desc: Build the Docker image with the compiler and checks
-    cmds: [bash scripts/build.sh --tools-only]
   check:
     desc: Lint, test release metadata, and test Linux extraction inside Docker
     cmds: [bash scripts/check.sh]
   build:
-    desc: Cross-compile macOS arm64 in Docker using the local Apple SDK
+    desc: Build and smoke-test macOS arm64 with Xcode 26.5 (CI entrypoint)
     cmds: [bash scripts/build.sh]
   smoke:
     desc: Test the macOS binary on this Apple Silicon Mac

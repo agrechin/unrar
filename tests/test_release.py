@@ -7,6 +7,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location("release", Path(__file__).resolve().parents[1] / "scripts/release.py")
 release = importlib.util.module_from_spec(spec)
@@ -137,3 +138,27 @@ class ReleaseTests(unittest.TestCase):
             }))
             with self.assertRaisesRegex(ValueError, "Binary changed"):
                 release.validate_build(directory)
+
+    def test_native_metadata_records_toolchain_and_checks_linked_minimum_os(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.source_fixture(root)
+            manifest = json.loads((root / "upstream.json").read_text())
+            manifest.update(url="https://www.rarlab.com/rar/unrarsrc-7.2.7.tar.gz", sha256="a" * 64)
+            (root / "upstream.json").write_text(json.dumps(manifest))
+            output = root / "build-info.json"
+            (root / "unrar").write_bytes(b"native binary")
+            with patch.object(release.subprocess, "check_output", side_effect=[
+                        "cmd LC_BUILD_VERSION\n minos 12.0\n sdk 26.5\n",
+                        "26.5\n", "Apple clang\n", "Xcode 26.5\nBuild version 17F42\n"]), \
+                    patch.dict(os.environ, {"ImageOS": "macos26", "ImageVersion": "test-image"}):
+                release.build_info(output, root)
+            info = json.loads(output.read_text())
+            self.assertEqual(info["sdk"], "26.5")
+            self.assertEqual(info["minimum_macos"], "12.0")
+            self.assertEqual(info["binary_sha256"], release.sha256(root / "unrar"))
+            self.assertEqual(info["runner_image"]["ImageVersion"], "test-image")
+            for load_commands in ("cmd LC_BUILD_VERSION\n minos 26.0\n", ""):
+                with patch.object(release.subprocess, "check_output", return_value=load_commands), \
+                        self.assertRaisesRegex(ValueError, "linked minimum macOS"):
+                    release.build_info(output, root)

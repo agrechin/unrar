@@ -1,35 +1,28 @@
 #!/usr/bin/env bash
 set -euo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
-image=unrar-toolchain:local
-mode=${1:-}
-case "$mode" in
-  ''|--tools-only|--check-only|--with-checks) ;;
-  *) echo 'Usage: build.sh [--tools-only|--check-only|--with-checks]' >&2; exit 1 ;;
-esac
-
-docker build --tag "$image" --file "$root/docker/Dockerfile" "$root"
-if [[ $mode == --tools-only ]]; then
-  exit 0
-fi
-if [[ $mode == --check-only || $mode == --with-checks ]]; then
-  docker run --rm --network none --user "$(id -u):$(id -g)" \
-    --mount "type=bind,source=$root,target=/src,readonly" \
-    "$image" bash /src/scripts/check-container.sh
-  [[ $mode != --check-only ]] || exit 0
-fi
-[[ $(uname -s) == Darwin ]] || { echo 'Build on a Mac with Xcode Command Line Tools and Docker.' >&2; exit 1; }
-sdk=${MACOS_SDK_PATH:-$(xcrun --sdk macosx26.5 --show-sdk-path)}
-sdk=$(cd "$sdk" && pwd -P)
-[[ -f "$sdk/SDKSettings.json" ]] || { echo 'Invalid macOS SDK.' >&2; exit 1; }
-mkdir -p "$root/.build/macos"
-# Docker Desktop does not share /Library by default. Stage the SDK only in
-# ignored local build storage, outside the Docker build context.
-sdk_stage=$(mktemp -d "$root/.build/sdk.XXXXXX")
-trap 'rm -rf "$sdk_stage"' EXIT
-ditto --noextattr --norsrc "$sdk" "$sdk_stage/MacOSX.sdk"
-docker run --rm --network none --user "$(id -u):$(id -g)" \
-  --mount "type=bind,source=$root,target=/src,readonly" \
-  --mount "type=bind,source=$sdk_stage/MacOSX.sdk,target=/sdk,readonly" \
-  --mount "type=bind,source=$root/.build/macos,target=/out" \
-  "$image" bash /src/scripts/build-container.sh
+[[ $# == 0 ]] || { echo 'Usage: build.sh' >&2; exit 1; }
+[[ $(uname -s) == Darwin && $(uname -m) == arm64 ]] || {
+  echo 'Native build requires an Apple Silicon macOS runner.' >&2; exit 1;
+}
+# Use the same explicitly selected toolchain in validation and release jobs.
+export DEVELOPER_DIR=/Applications/Xcode_26.5.app/Contents/Developer
+sdk=$(xcrun --sdk macosx26.5 --show-sdk-path)
+[[ $(xcrun --sdk macosx26.5 --show-sdk-version) == 26.5 ]] || {
+  echo 'Expected macOS SDK 26.5.' >&2; exit 1;
+}
+python3 "$root/scripts/release.py" verify-source
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+cp -R "$root/vendor/unrar/." "$work/"
+# Keep architecture, SDK, and minimum OS on both compile and link commands.
+make -C "$work" -j"$(sysctl -n hw.logicalcpu)" \
+  CXX="xcrun --sdk macosx26.5 clang++ -arch arm64 -isysroot $sdk -mmacosx-version-min=12.0" \
+  STRIP='xcrun strip'
+out="$root/.build/macos"
+mkdir -p "$out"
+install -m 755 "$work/unrar" "$out/unrar"
+cp "$root/vendor/unrar/license.txt" "$root/vendor/unrar/acknow.txt" "$out/"
+[[ $(lipo -archs "$out/unrar") == arm64 ]] || { echo 'Expected arm64 binary.' >&2; exit 1; }
+python3 "$root/scripts/release.py" build-info "$out/build-info.json"
+python3 "$root/scripts/smoke.py" "$out/unrar"

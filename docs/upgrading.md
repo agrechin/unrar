@@ -1,136 +1,83 @@
-# Upgrade the upstream UnRAR source
+# Upgrade and release from GitHub
 
-Each checkout contains one upstream version in `vendor/unrar/`. Upgrade by
-replacing that **entire snapshot**, including its makefile, license, and
-acknowledgements. Keep older versions in Git tags and GitHub Releases, rather
-than adding version directories. Repository scripts, tests, and workflows live
-outside the snapshot.
+No local build tools are required. Each checkout contains one complete upstream
+snapshot in `vendor/unrar/`; older versions remain in Git tags and releases.
+Complete the [one-time GitHub setup](../README.md#one-time-github-setup) first.
 
-## 1. Select and download a stable source archive
+## 1. Import a stable upstream archive
 
-For a single upgrade commit, start on `main` with a clean working tree. Find the
-official UnRAR **source** archive on
-[RARLAB](https://www.rarlab.com/rar_add.htm) and use its exact versioned HTTPS URL.
-The general download link may point to a beta. This repository only releases
-stable source: `RARVER_BETA` in `version.hpp` must be zero.
+Find the exact versioned UnRAR **source** archive on
+[RARLAB](https://www.rarlab.com/rar_add.htm). The general source link may point to
+a beta, which this repository will reject. Obtain the expected archive SHA-256
+and compare it with an official checksum if one is available. Otherwise, review
+the source provenance and record its checksum as a fingerprint; a checksum
+calculated from a download alone does not authenticate its origin.
 
-Do not infer the application version from the archive filename. For example,
-`unrarsrc-7.2.7.tar.gz` contains UnRAR 7.23, which this repository tags `v7.23.0`.
-The import command reads the version from the source itself.
+In **Actions → Update upstream → Run workflow**:
 
-Replace the placeholder with the selected archive's URL:
+- Select `main` in **Use workflow from**.
+- Enter the exact `https://www.rarlab.com/rar/unrarsrc-<version>.tar.gz` URL.
+- Enter the expected SHA-256 as 64 lowercase hexadecimal characters.
 
-```sh
-UPSTREAM_URL='https://www.rarlab.com/rar/unrarsrc-<archive-version>.tar.gz'
-mkdir -p .build
-curl --fail --location --proto '=https' --proto-redir '=https' \
-  "$UPSTREAM_URL" --output .build/upstream.tar.gz
-shasum -a 256 .build/upstream.tar.gz
-```
+The workflow downloads the archive, verifies its checksum, and invokes the
+existing importer. The importer rejects beta source, links, unexpected paths,
+duplicate entries, and modified existing source. It replaces the complete
+snapshot without changing upstream file bytes and regenerates `upstream.json`.
+The archive filename does not necessarily match `version.hpp`; the latter
+defines the application version and release tag.
 
-Compare the checksum with an official checksum if one is available. Otherwise,
-review the archive downloaded over HTTPS from RARLAB and record its SHA-256 as
-the import fingerprint; computing a hash alone does not authenticate the source.
+If the snapshot changed, the workflow commits only `vendor/unrar/` and
+`upstream.json` on a new `codex/` branch and opens a pull request. It explicitly
+dispatches CI because PRs created with `GITHUB_TOKEN` do not automatically trigger
+pull-request workflows. No signing credentials are available to this CI run.
 
-## 2. Import the complete snapshot
+If PR creation fails, check **Settings → Actions → General → Workflow
+permissions → Allow GitHub Actions to create and approve pull requests**. The
+branch remains available; fix the setting and rerun the update, or open its PR
+in the browser and manually run CI on that branch. If only CI dispatch fails,
+manually run **CI** with the PR branch selected.
 
-Set the expected archive checksum, then run:
+## 2. Review and merge
 
-```sh
-UPSTREAM_SHA256='<expected-64-character-sha256>'
-python3 scripts/import-upstream.py .build/upstream.tar.gz \
-  --url "$UPSTREAM_URL" --sha256 "$UPSTREAM_SHA256"
-```
+Review the source, license, acknowledgement, version, and manifest changes in
+the PR. Check **check** and **macos** results, including extraction tests on both
+platforms. If upstream changes its layout or build system, update the tooling
+explicitly before merging. Never edit upstream `version.hpp` to invent a
+version or turn a beta into stable source.
 
-The command checks the archive hash, rejects beta source and unexpected archive
-paths or links, and stages the new files before replacing `vendor/unrar/`.
-Obsolete files disappear automatically. It regenerates `upstream.json` with the
-version, URL, archive checksum, and every upstream file checksum. Manifest
-filenames are relative to `vendor/unrar/`. File contents are copied unchanged.
-It refuses to discard source files that no longer match the existing manifest.
-It does not download, commit, tag, sign, or publish anything.
+Merge according to repository history policy. Then wait for **CI on `main`** to
+pass and copy that run's full 40-character commit SHA. A successful PR build
+alone is insufficient for release preparation. Normal pushes do not publish.
 
-Review the source and license changes and update README's current version,
-file count, archive link/checksum, and release command examples. Do not edit `version.hpp`
-to invent a version or turn a beta into a stable release.
+## 3. Prepare and follow the release
 
-```sh
-git diff --stat
-git diff -- upstream.json README.md
-git status --short
-python3 scripts/release.py verify-source
-python3 scripts/release.py version
-```
+In **Actions → Prepare release → Run workflow**, select `main` and enter the
+tested commit SHA. Preparation checks that the commit belongs to `main`, that
+its latest push CI passed both required jobs, and that its upstream source is
+stable and matches the manifest. It creates `v<version>` and starts **Release**
+on that tag. It refuses to move a tag or start over when a release already exists.
 
-Use `git status` to include new upstream files in the review; unstaged new files
-do not appear in `git diff` yet. If the upstream archive layout or build system
-changes, update the import/build tooling explicitly before proceeding.
+Follow the separately dispatched **Release** run in Actions. Preparation success
+means the release was dispatched, not that publication has finished. Release
+uses the tag-scoped `release` environment, performs signing and notarization on
+a hosted Apple Silicon runner, and publishes from hosted Ubuntu.
 
-## 3. Validate and commit
+After Release succeeds, verify the GitHub release and the updated
+[`Casks/unrar.rb`](https://github.com/agrechin/homebrew-tap/blob/main/Casks/unrar.rb).
+Users can then run `brew update` and `brew upgrade --cask agrechin/tap/unrar`.
 
-On an Apple Silicon Mac with Docker and SDK 26.5:
+## Recovery and older versions
 
-```sh
-bash scripts/check.sh
-bash scripts/build.sh
-python3 scripts/smoke.py .build/macos/unrar
-```
+- Tag created but dispatch failed: rerun preparation for the same SHA, or
+  manually run Release with the tag selected as both workflow ref and input.
+- Signing/notarization failed before publication: inspect the failing step and
+  Apple submission log, correct the cause, and rerun failed jobs.
+- Publication/tap update failed: rerun **only failed jobs in the original Release
+  run**, preserving its original signed artifact. Never rebuild an already
+  published release. Artifacts expire after 14 days.
 
-Review and stage the upstream snapshot, manifest, README, and any required
-tooling changes. For an upgrade that only changes the first three:
-
-```sh
-git add vendor/unrar upstream.json README.md
-git diff --cached --check
-git diff --cached --stat
-git commit -m "chore: update UnRAR to $(python3 scripts/release.py version)"
-git push origin main
-```
-
-Wait for the `CI` workflow on that commit to pass before releasing. A normal push
-only runs checks; it does not publish a new version.
-
-## 4. Publish a new tag
-
-Once the source commit is reviewed, tested, and on `main`, derive a fresh tag
-from the imported source:
-
-```sh
-RELEASE_VERSION=$(python3 scripts/release.py version)
-git tag -a "v$RELEASE_VERSION" -m "UnRAR $RELEASE_VERSION"
-git push origin "v$RELEASE_VERSION"
-```
-
-The `Release` workflow builds that tag, signs and notarizes it, publishes a
-versioned DMG, and updates `agrechin/homebrew-tap`'s `Casks/unrar.rb` to that
-release. Do not move an existing tag or replace published release assets.
-For publication recovery, follow the [README](../README.md#publish): rerun only
-failed jobs so the original signed artifact is reused.
-
-Users can then update with:
-
-```sh
-brew update
-brew upgrade --cask agrechin/tap/unrar
-```
-
-## What supports multiple versions?
-
-| Component | Current behavior |
-| --- | --- |
-| Source tree | One upstream version per checkout; Git tags preserve previous snapshots. |
-| CI | Tests the version in the checked-out commit. There is no matrix testing older UnRAR versions. |
-| Release workflow | Handles successive stable tags with version-specific DMG names and download URLs. Release runs are serialized. |
-| GitHub Releases | Separate published releases retain their own assets. Publishing a new tag does not replace earlier release bytes. |
-| Homebrew tap | One `unrar` cask, pointing to the last release written by the publisher; one linked `unrar` command. No version selector or parallel installs are configured. |
-
-Publishing an older tag can move the single cask back to that version: the
-publisher currently has no version-order check. Do not use an old release run
-as a way to install an older version, or rerun its publisher after a newer release.
-Existing releases can be downloaded directly without republishing them.
-
-Homebrew supports [separate versioned cask tokens](https://docs.brew.sh/Cask-Cookbook#casks-pinned-to-specific-versions),
-but this repository does not generate them. Adding selectable versions would
-require separate casks such as `unrar@7.23`; installing them together would also
-require distinct [binary targets](https://docs.brew.sh/Cask-Cookbook#stanza-binary)
-so they do not compete for `bin/unrar`. That is a separate release-policy change.
+Each tag has its own GitHub release, but the Homebrew tap exposes one `unrar`
+cask and one installed command. It does not provide a version selector or
+parallel installs. Download older releases directly rather than republishing
+them: rerunning an old publisher after a newer release can move the cask back
+to the older version. Published assets and existing tags must not be replaced.

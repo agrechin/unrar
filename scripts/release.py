@@ -104,15 +104,24 @@ end
 '''
 
 
-def build_info(output):
-    verify_source()
-    provenance = json.loads((ROOT / "upstream.json").read_text())
-    source = ROOT / SOURCE_DIR
-    sdk = json.loads(Path("/sdk/SDKSettings.json").read_text())
+def build_info(output, root=ROOT):
+    verify_source(root)
+    provenance = json.loads((root / "upstream.json").read_text())
+    source = root / SOURCE_DIR
+    def xcrun(*args):
+        return subprocess.check_output(["xcrun", "--sdk", "macosx26.5", *args], text=True).strip()
+
+    # Read the actual linked deployment target, not just the intended flags.
+    load_commands = subprocess.check_output(["otool", "-l", str(output.parent / "unrar")], text=True)
+    minimum = re.search(r"\bminos\s+(\S+)", load_commands)
+    if not minimum or minimum[1] != MIN_MACOS:
+        raise ValueError(f"Expected linked minimum macOS {MIN_MACOS}")
     data = {
-        "version": version(), "architecture": "arm64", "minimum_macos": MIN_MACOS,
-        "sdk": sdk["Version"] if "Version" in sdk else sdk["CanonicalName"],
-        "compiler": subprocess.check_output(["clang++", "--version"], text=True).strip(),
+        "version": version(root), "architecture": "arm64", "minimum_macos": MIN_MACOS,
+        "sdk": xcrun("--show-sdk-version"),
+        "compiler": xcrun("clang++", "--version"),
+        "xcode": subprocess.check_output(["xcodebuild", "-version"], text=True).strip(),
+        "runner_image": {key: os.environ.get(key) for key in ("ImageOS", "ImageVersion")},
         "source_sha256": {name: sha256(source / name) for name in sorted(provenance["files"])},
         "binary_sha256": sha256(output.parent / "unrar"),
         "upstream": {key: provenance[key] for key in ("version", "url", "sha256")},
@@ -126,7 +135,9 @@ def validate_build(directory):
     if info["version"] != version() or info["architecture"] != "arm64":
         raise ValueError("Build version/architecture does not match this source")
     if sha256(directory / "unrar") != info["binary_sha256"]:
-        raise ValueError("Binary changed since the Docker build")
+        raise ValueError("Binary changed since the native build")
+    if info["minimum_macos"] != MIN_MACOS or info["sdk"] != "26.5":
+        raise ValueError("Build minimum OS or SDK differs from the release toolchain")
     expected_files = set(json.loads((ROOT / "upstream.json").read_text())["files"])
     if set(info["source_sha256"]) != expected_files:
         raise ValueError("Build source file list differs from this checkout")

@@ -18,14 +18,31 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: refs/tags/${{ inputs.tag || github.ref_name }}
+          persist-credentials: false
+      - name: Check release ref and source
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          [[ "$GITHUB_REF" == "refs/tags/$RELEASE_TAG" ]]
+          python3 scripts/release.py check-tag "$RELEASE_TAG"
+      - name: Lint, release tests, Linux build and extraction tests
+        run: bash scripts/check.sh
+
   package:
-    # Dedicated trusted Mac; never run pull_request jobs on this runner.
-    runs-on: [self-hosted, macOS, ARM64, unrar-release]
+    needs: check
+    runs-on: macos-26
     environment: release
     timeout-minutes: 90
     env:
       RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
-      MACOS_SDK_PATH: ${{ vars.MACOS_SDK_PATH }}
+      DEVELOPER_DIR: /Applications/Xcode_26.5.app/Contents/Developer
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -39,8 +56,8 @@ jobs:
           MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
           MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
         run: python3 scripts/release.py preflight sign "$RELEASE_TAG"
-      - name: Check tooling and build in Docker
-        run: bash scripts/build.sh --with-checks
+      - name: Native arm64 build and extraction tests
+        run: bash scripts/build.sh
       - name: Sign, notarize, staple, and test the disk image
         env:
           MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
@@ -56,9 +73,6 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 14
-      - name: Remove local build output from the signing runner
-        if: always()
-        run: rm -rf .build
 
   publish:
     needs: package

@@ -1,0 +1,36 @@
+name: Update upstream
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: Exact versioned HTTPS RARLAB source archive URL
+        required: true
+        type: string
+      sha256:
+        description: Expected archive SHA-256 (64 lowercase hexadecimal characters)
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+
+concurrency:
+  group: unrar-update-upstream
+  cancel-in-progress: false
+
+jobs:
+  update:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Import source and open a pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPSTREAM_URL: ${{ inputs.url }}
+          UPSTREAM_SHA256: ${{ inputs.sha256 }}
+        run: bash scripts/update-upstream.sh

@@ -28,7 +28,7 @@ class FindFile
 {
   private:
 #ifdef _WIN_ALL
-    static bool Win32Find(HANDLE &hFind,const std::wstring &Mask,FindData *fd);
+    static HANDLE Win32Find(HANDLE hFind,const std::wstring &Mask,FindData *fd);
 #endif
 
     std::wstring FindMask;

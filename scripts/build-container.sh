@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+python3 /src/scripts/release.py verify-source
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 cp /src/*.cpp /src/*.hpp /src/makefile "$work/"

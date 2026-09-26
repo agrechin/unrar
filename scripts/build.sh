@@ -2,10 +2,21 @@
 set -euo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
 image=unrar-toolchain:local
+mode=${1:-}
+case "$mode" in
+  ''|--tools-only|--check-only|--with-checks) ;;
+  *) echo 'Usage: build.sh [--tools-only|--check-only|--with-checks]' >&2; exit 1 ;;
+esac
 
 docker build --tag "$image" --file "$root/docker/Dockerfile" "$root"
-if [[ ${1:-} == --tools-only ]]; then
+if [[ $mode == --tools-only ]]; then
   exit 0
+fi
+if [[ $mode == --check-only || $mode == --with-checks ]]; then
+  docker run --rm --network none --user "$(id -u):$(id -g)" \
+    --mount "type=bind,source=$root,target=/src,readonly" \
+    "$image" bash /src/scripts/check-container.sh
+  [[ $mode != --check-only ]] || exit 0
 fi
 [[ $(uname -s) == Darwin ]] || { echo 'Build on a Mac with Xcode Command Line Tools and Docker.' >&2; exit 1; }
 sdk=${MACOS_SDK_PATH:-$(xcrun --sdk macosx26.5 --show-sdk-path)}

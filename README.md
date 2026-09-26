@@ -1,10 +1,10 @@
 # UnRAR for Apple Silicon
 
-Build RARLAB's supplied UnRAR source in Docker, sign and notarize on macOS,
+Build RARLAB's stable UnRAR source in Docker, sign and notarize on macOS,
 and publish a Homebrew cask in [`agrechin/homebrew-tap`](https://github.com/agrechin/homebrew-tap).
 This is an independent build and distribution of UnRAR, not an official RARLAB release.
 
-The current source is **7.30 beta 1** (`7.30.0-beta.1` for release tags).
+The current source is **stable 7.23** (`7.23.0` for release tags).
 The target is **macOS 12 or later, Apple Silicon only**. Intel is not supported.
 The deployment target is checked in the build configuration; the minimum OS
 still needs testing on an actual macOS 12 machine.
@@ -17,6 +17,8 @@ unrar x archive.rar
 ```
 
 No release is created by a normal push to `main`.
+Signing, notarization, and publication are supported only through the GitHub
+`Release` workflow. Local commands provide checks and unsigned builds.
 
 ## Build and test
 
@@ -32,13 +34,18 @@ python3 scripts/smoke.py .build/macos/unrar
 ```
 
 Equivalent commands: `task check`, `task build`, `task smoke`.
+Local commands and CI invoke the same scripts. To run checks and the macOS build
+together, use `bash scripts/build.sh --with-checks`; this prepares the Docker
+image once. The release workflow uses this combined command.
 The output is `.build/macos/unrar`. This local build is not Developer ID signed
 or notarized; distribution goes through the release workflow below.
 
 The image uses digest-pinned Ubuntu 26.04 and LLVM 21. Dependency packages are
 resolved from Ubuntu when the image is first built; builds are not claimed to
 be byte-for-byte reproducible. `build-info.json` records source file checksums,
-the SDK, compiler version, deployment target, and unsigned executable checksum.
+the SDK, compiler version, deployment target, unsigned executable checksum, and
+upstream provenance. Both checks and builds verify the vendored source against
+the file checksums in `upstream.json`.
 
 The SDK defaults to `xcrun --sdk macosx26.5 --show-sdk-path`. To select another
 compatible, locally installed SDK:
@@ -101,25 +108,27 @@ private-key files on exit. It does not change the login keychain search list.
 After the runner and environment secrets are configured, tag the reviewed source:
 
 ```sh
-git tag -a v7.30.0-beta.1 -m 'UnRAR 7.30 beta 1'
-git push origin v7.30.0-beta.1
+git tag -a v7.23.0 -m 'UnRAR 7.23'
+git push origin v7.23.0
 ```
 
-The tag must match `version.hpp`; beta tags remain GitHub prereleases. This custom
-cask follows the supplied version, including beta releases. There is no silent
-promotion of beta source to a stable release. A manually dispatched `Release`
-workflow accepts an existing tag as well.
+The tag must match `version.hpp`, and `RARVER_BETA` must be zero. The release
+preflight rejects beta source even if its tag matches. Casks accept stable
+versions only. A manually dispatched `Release` workflow accepts an existing
+stable tag as well.
 
 For manual dispatch, select that same tag as the workflow ref so it is allowed
 by the release environment's tag policy:
 
 ```sh
-gh workflow run release.yml --repo agrechin/unrar --ref v7.30.0-beta.1 -f tag=v7.30.0-beta.1
+gh workflow run release.yml --repo agrechin/unrar --ref v7.23.0 -f tag=v7.23.0
 ```
 
 The release workflow:
 
-1. Checks tooling and extraction, then builds ARM64 in Docker.
+1. Validates the release context, stable source, tag, and required credentials
+   using the shared preflight in `scripts/release.py`; checks tooling and
+   extraction, then builds ARM64 in Docker with one image-preparation step.
 2. Checks source and binary hashes to reject stale build output.
 3. Signs the executable with hardened runtime and a secure timestamp.
 4. Creates and signs a DMG containing `unrar`, the original license,
@@ -142,22 +151,30 @@ jobs to replace an existing release. Artifacts are retained for 14 days. A faile
 or timed-out notarization cannot publish; use its submission ID to investigate
 with `notarytool` before retrying.
 
-For local packaging with the same five signing secrets in the environment:
-
-```sh
-task build
-task release:package TAG=v7.30.0-beta.1
-```
-
-This creates `.build/release/` without publishing it. Signing/notarization must
-be validated with real credentials before claiming that a release is ready.
+The signing and publishing entrypoints reject calls outside this repository's
+GitHub `Release` workflow on the matching tag. There is no local release command.
+Signing/notarization must be validated with real credentials before claiming
+that a release is ready.
 
 ## Upstream and licenses
 
-The source files and upstream `makefile` are retained as supplied. Upstream:
-[RARLAB UnRAR source](https://www.rarlab.com/rar_add.htm). The initial source was
-already present in this directory; its original download checksum was not supplied
-and is not claimed to have been independently verified.
+The 159 upstream files, including the `makefile` and licenses, are imported
+without modification from the official [stable source archive](https://www.rarlab.com/rar/unrarsrc-7.2.7.tar.gz).
+The archive filename is `7.2.7`, while its `version.hpp` declares stable **7.23**.
+[RARLAB's general source link](https://www.rarlab.com/rar_add.htm) can point to a
+beta, so it is not used as an unversioned download source for this repository.
+
+[`upstream.json`](upstream.json) records the URL, archive SHA-256, version, and
+individual file checksums. The downloaded archive's verified SHA-256 is:
+
+```text
+01d903a7dcf413cb2925696d7796e48e38d471f79bfe7ef3ad2aebf6c12dbefd
+```
+
+For an upstream update, select an official stable archive, record its URL and
+SHA-256, replace the upstream files exactly (including removing obsolete files),
+and regenerate the file checksums in `upstream.json`. Keep repository tooling
+outside that import. Re-run the Docker checks, macOS build, and extraction tests.
 
 UnRAR is source-available freeware governed by [`license.txt`](license.txt),
 including its restriction on developing a RAR-compatible archiver or recreating

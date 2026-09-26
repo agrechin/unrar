@@ -125,7 +125,7 @@ void ExtractStreams20(Archive &Arc,const std::wstring &FileName)
 
 
 #ifdef _WIN_ALL
-void ExtractStreams(CommandData *Cmd,Archive &Arc,const std::wstring &FileName)
+void ExtractStreams(Archive &Arc,const std::wstring &FileName,bool TestMode)
 {
   std::wstring StreamName=GetStreamNameNTFS(Arc);
 
@@ -136,16 +136,10 @@ void ExtractStreams(CommandData *Cmd,Archive &Arc,const std::wstring &FileName)
     return;
   }
 
-  if (Cmd->Test)
+  if (TestMode)
   {
-    if (!Cmd->DisableNames)
-      mprintf(St(MExtrTestFile),(FileName+StreamName).c_str());
     File CurFile;
-    if (Arc.ReadSubData(nullptr,&CurFile,true) && !Cmd->DisableNames &&
-        !Cmd->DisablePercentage)
-    {
-      mprintf(L" %s",St(MOk));
-    }
+    Arc.ReadSubData(nullptr,&CurFile,true);
     return;
   }
 
@@ -193,10 +187,6 @@ void ExtractStreams(CommandData *Cmd,Archive &Arc,const std::wstring &FileName)
 
   if (CurFile.WCreate(FullName))
   {
-    CurFile.SetAllowDelete(!Cmd->KeepBroken);
-
-    if (!Cmd->DisableNames)
-      mprintf(St(MExtrFile),FullName.c_str());
 #ifdef PROPAGATE_MOTW
     if (!ParsedMotw.empty())
     {
@@ -208,15 +198,10 @@ void ExtractStreams(CommandData *Cmd,Archive &Arc,const std::wstring &FileName)
     else
 #endif
     if (Arc.ReadSubData(nullptr,&CurFile,false))
-    {
       CurFile.Close();
-      if (!Cmd->DisableNames && !Cmd->DisablePercentage)
-        mprintf(L" %s",St(MOk));
-    }
   }
 
-  // Restoring original file timestamps. Note that NTFS ADS share file
-  // attributes and times with the main file.
+  // Restoring original file timestamps.
   File HostFile;
   if (HostFound && HostFile.Open(FileName,FMF_OPENSHARED|FMF_UPDATE))
     SetFileTime(HostFile.GetHandle(),&FD.ftCreationTime,&FD.ftLastAccessTime,

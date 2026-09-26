@@ -38,15 +38,9 @@ jobs:
           MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
           MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
           MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
-        run: |
-          python3 scripts/release.py check-tag "$RELEASE_TAG"
-          for name in MACOS_SIGN_P12 MACOS_SIGN_PASSWORD MACOS_NOTARY_KEY MACOS_NOTARY_KEY_ID MACOS_NOTARY_ISSUER_ID; do
-            test -n "${!name}" || { echo "Missing secret: $name" >&2; exit 1; }
-          done
+        run: python3 scripts/release.py preflight sign "$RELEASE_TAG"
       - name: Check tooling and build in Docker
-        run: |
-          bash scripts/check.sh
-          bash scripts/build.sh
+        run: bash scripts/build.sh --with-checks
       - name: Sign, notarize, staple, and test the disk image
         env:
           MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}

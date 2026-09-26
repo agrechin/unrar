@@ -8,7 +8,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from release import check_tag
+from release import preflight
 
 URL = "https://api.github.com/repos/agrechin/homebrew-tap/contents/Casks/unrar.rb"
 
@@ -31,7 +31,7 @@ def request(method, payload=None):
 
 def main():
     tag, path = sys.argv[1:]
-    check_tag(tag)
+    preflight("publish", tag)
     content = Path(path).read_bytes()
     old = request("GET")
     if old and base64.b64decode(old["content"]) == content:

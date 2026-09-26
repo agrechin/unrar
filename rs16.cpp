@@ -258,14 +258,11 @@ void RSCoder16::Process(const uint *Data, uint *Out)
 #endif
 
 
-// We write recovery data over former ECC blocks by applying every data block
-// to each ECC block. This function applies one data block to one ECC block.
+// We update ECC in blocks by applying every data block to all ECC blocks.
+// This function applies one data block to one ECC block.
 void RSCoder16::UpdateECC(uint DataNum, uint ECCNum, const byte *Data, byte *ECC, size_t BlockSize)
 {
-  // Init former ECC data before processing the first data block.
-  // We use this former ECC as output buffer and we copied its actual
-  // ECC contents over invalid data block before that.
-  if (DataNum==0)
+  if (DataNum==0) // Init ECC data.
     memset(ECC, 0, BlockSize);
 
   bool DirectAccess;

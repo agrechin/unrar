@@ -11,11 +11,7 @@ CommandData::CommandData()
 
 void CommandData::Init()
 {
-  // "*this={}" in RAROptions constructor causes the constructor to call itself
-  // infinitely, so we do it in the derived class instead.
-  *(RAROptions*)this={}; // Initialize all fields to default values.
-
-  RAROptions::Init(); // Set all non-default values.
+  RAROptions::Init();
 
   Command.clear();
   ArcName.clear();
@@ -408,16 +404,9 @@ void CommandData::ProcessSwitch(const wchar *Switch)
           case 'H':
             OpenShared=true;
             break;
-          case 'A':
-            DeleteArchive=true;
+          case 'F':
+            DeleteFiles=true;
             break;
-
-#ifdef _WIN_ALL // Need it in UnRAR too for -da switch.
-          case 'R':
-            DeleteToRecycleBin=true;
-            break;
-#endif
-
           default:
             BadSwitch(Switch);
             break;
@@ -453,11 +442,11 @@ void CommandData::ProcessSwitch(const wchar *Switch)
         default:
           if (Switch[1]=='+')
           {
-            InclFileAttr|=GetExclAttr(Switch+2,false,DirMode);
+            InclFileAttr|=GetExclAttr(Switch+2,InclDir);
             InclAttrSet=true;
           }
           else
-            ExclFileAttr|=GetExclAttr(Switch+1,true,DirMode);
+            ExclFileAttr|=GetExclAttr(Switch+1,ExclDir);
           break;
       }
       break;
@@ -1219,7 +1208,7 @@ bool CommandData::IsSwitch(int Ch)
 
 
 #ifndef SFX_MODULE
-uint CommandData::GetExclAttr(const wchar *Str,bool Exclude,DIR_FILTER_MODE &DirMode)
+uint CommandData::GetExclAttr(const wchar *Str,bool &Dir)
 {
   if (IsDigit(*Str))
     return wcstol(Str,NULL,0);
@@ -1230,10 +1219,7 @@ uint CommandData::GetExclAttr(const wchar *Str,bool Exclude,DIR_FILTER_MODE &Dir
     switch(toupperw(*Str))
     {
       case 'D':
-        if (Exclude)
-          DirMode=Str[1]=='1' ? DIRFM_EXCLUDE_EMPTY:DIRFM_EXCLUDE_ALL;
-        else
-          DirMode=DIRFM_DIR_ONLY;
+        Dir=true;
         break;
 #ifdef _UNIX
       case 'V':

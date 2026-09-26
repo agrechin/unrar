@@ -2,9 +2,7 @@
 set -euo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
 tag=${1:?Usage: publish.sh vVERSION}
-version=$(python3 "$root/scripts/release.py" check-tag "$tag")
-: "${GH_TOKEN:?GitHub release token is required}"
-: "${HOMEBREW_TAP_TOKEN:?Homebrew tap token is required}"
+version=$(python3 "$root/scripts/release.py" preflight publish "$tag")
 dist="$root/.build/release"
 artifact="unrar_${version}_darwin_arm64.dmg"
 repo=agrechin/unrar
@@ -39,9 +37,7 @@ UnRAR is source-available freeware under RARLAB's license. The archive includes
 the original license and acknowledgements. Source: https://github.com/$repo/tree/$tag
 EOF
 if ! gh release view "$tag" --repo "$repo" --json isDraft > "$temp/release.json"; then
-  prerelease=()
-  [[ $version != *-beta.* ]] || prerelease=(--prerelease)
-  gh release create "$tag" --repo "$repo" --verify-tag --draft "${prerelease[@]}" \
+  gh release create "$tag" --repo "$repo" --verify-tag --draft \
     --title "UnRAR $version (Apple Silicon)" --notes-file "$temp/notes.md"
   gh release view "$tag" --repo "$repo" --json isDraft > "$temp/release.json"
 fi

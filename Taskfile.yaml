@@ -15,10 +15,3 @@ tasks:
   smoke:
     desc: Test the macOS binary on this Apple Silicon Mac
     cmds: [python3 scripts/smoke.py .build/macos/unrar]
-  release:package:
-    desc: Sign, notarize, staple, and generate cask metadata (TAG=vVERSION)
-    requires:
-      vars: [TAG]
-    env:
-      RELEASE_TAG: '{{.TAG}}'
-    cmds: [bash scripts/sign-notarize.sh "$RELEASE_TAG"]

@@ -1,13 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
+version=$(python3 "$root/scripts/release.py" preflight sign "${1:?Usage: sign-notarize.sh vVERSION}")
 [[ $(uname -s) == Darwin && $(uname -m) == arm64 ]] || {
   echo 'Signing and release smoke tests require an Apple Silicon Mac.' >&2; exit 1;
 }
-version=$(python3 "$root/scripts/release.py" check-tag "${1:?Usage: sign-notarize.sh vVERSION}")
-for name in MACOS_SIGN_P12 MACOS_SIGN_PASSWORD MACOS_NOTARY_KEY MACOS_NOTARY_KEY_ID MACOS_NOTARY_ISSUER_ID; do
-  [[ -n ${!name:-} ]] || { echo "Required secret is missing: $name" >&2; exit 1; }
-done
 python3 "$root/scripts/release.py" validate-build "$root/.build/macos"
 [[ $(lipo -archs "$root/.build/macos/unrar") == arm64 ]] || { echo 'Expected arm64 binary.' >&2; exit 1; }
 python3 "$root/scripts/smoke.py" "$root/.build/macos/unrar"

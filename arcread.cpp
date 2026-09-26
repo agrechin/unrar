@@ -673,12 +673,7 @@ size_t Archive::ReadHeader50()
 
   uint HeaderCRC=Raw.GetCRC50();
 
-  uint64 HeaderType=Raw.GetV();
-  // Adjust values larger than maximum enum type, because they might not be
-  // able to fit to udnerlying enum data type and storing them is undefined
-  // behavior in C++.
-  ShortBlock.HeaderType=Min((HEADER_TYPE)HeaderType,HEAD_UNKNOWN);
-
+  ShortBlock.HeaderType=(HEADER_TYPE)Raw.GetV();
   ShortBlock.Flags=(uint)Raw.GetV();
   ShortBlock.SkipIfUnknown=(ShortBlock.Flags & HFL_SKIPIFUNKNOWN)!=0;
   ShortBlock.HeadSize=HeaderSize;
@@ -1176,15 +1171,14 @@ void Archive::ProcessExtra50(RawRead *Raw,size_t ExtraSize,const BaseBlock *bb)
           break;
         case FHEXTRA_REDIR:
           {
-            uint64 RedirType=Raw->GetV();
+            FILE_SYSTEM_REDIRECT RedirType=(FILE_SYSTEM_REDIRECT)Raw->GetV();
             uint Flags=(uint)Raw->GetV();
             size_t NameSize=(size_t)Raw->GetV();
 
             if (NameSize>0 && NameSize<MAXPATHSIZE)
             {
               std::string UtfName(NameSize,0);
-              hd->RedirType=RedirType<FSREDIR_UNKNOWN ?
-                (FILE_SYSTEM_REDIRECT)RedirType:FSREDIR_UNKNOWN;
+              hd->RedirType=RedirType;
               hd->DirTarget=(Flags & FHEXTRA_REDIR_DIR)!=0;
               Raw->GetB(&UtfName[0],NameSize);
               UtfToWide(&UtfName[0],hd->RedirName);
@@ -1536,11 +1530,7 @@ bool Archive::ReadSubData(std::vector<byte> *UnpData,File *DestFile,bool TestMod
       return false;
   SubDataIO.UnpHash.Init(SubHead.FileHash.Type,1);
   SubDataIO.SetPackedSizeToRead(SubHead.PackSize);
-
-  // We would need to either reuse extraction DataIO or set
-  // SubDataIO.TotalArcSize to display progress.
   SubDataIO.EnableShowProgress(false);
-
   SubDataIO.SetFiles(this,DestFile);
   SubDataIO.SetTestMode(TestMode);
   SubDataIO.UnpVolume=SubHead.SplitAfter;

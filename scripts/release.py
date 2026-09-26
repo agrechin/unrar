@@ -3,6 +3,7 @@
 import argparse
 import hashlib
 import json
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -10,6 +11,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 REPOSITORY = "agrechin/unrar"
 MIN_MACOS = "12.0"
+REQUIRED_SECRETS = {
+    "sign": ("MACOS_SIGN_P12", "MACOS_SIGN_PASSWORD", "MACOS_NOTARY_KEY",
+             "MACOS_NOTARY_KEY_ID", "MACOS_NOTARY_ISSUER_ID"),
+    "publish": ("GH_TOKEN", "HOMEBREW_TAP_TOKEN"),
+}
 
 
 def version(root=ROOT):
@@ -19,20 +25,61 @@ def version(root=ROOT):
     return f"{major}.{minor}.0" + (f"-beta.{beta}" if beta else "")
 
 
-def check_tag(tag):
-    expected = f"v{version()}"
+def check_tag(tag, root=ROOT):
+    current = version(root)
+    if "-beta." in current:
+        raise ValueError("Releases require stable upstream source (RARVER_BETA must be 0)")
+    expected = f"v{current}"
     if tag != expected:
         raise ValueError(f"Tag must match version.hpp: expected {expected}, got {tag!r}")
     return tag[1:]
+
+
+def require_release_ci(tag, env=None):
+    env = os.environ if env is None else env
+    expected = {
+        "GITHUB_ACTIONS": "true", "GITHUB_REPOSITORY": REPOSITORY,
+        "GITHUB_WORKFLOW": "Release", "GITHUB_REF": f"refs/tags/{tag}",
+    }
+    if any(env.get(key) != value for key, value in expected.items()):
+        raise ValueError("Signing and publishing are supported only by this repository's "
+                         "GitHub Release workflow, running on the release tag")
+
+
+def preflight(stage, tag, root=ROOT, env=None):
+    env = os.environ if env is None else env
+    require_release_ci(tag, env)
+    release_version = check_tag(tag, root)
+    verify_source(root)
+    missing = [name for name in REQUIRED_SECRETS[stage] if not env.get(name)]
+    if missing:
+        raise ValueError("Required secrets are missing: " + ", ".join(missing))
+    return release_version
 
 
 def sha256(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
+def verify_source(root=ROOT):
+    provenance = json.loads((root / "upstream.json").read_text())
+    if provenance["version"] != version(root):
+        raise ValueError("Upstream provenance version does not match version.hpp")
+    expected = provenance["files"]
+    # Extra compilation units or headers must not silently enter an upstream build.
+    extra = {p.name for pattern in ("*.cpp", "*.hpp") for p in root.glob(pattern)} - set(expected)
+    if extra:
+        raise ValueError("Unrecorded upstream source files: " + ", ".join(sorted(extra)))
+    for name, checksum in expected.items():
+        if Path(name).name != name or name in (".", ".."):
+            raise ValueError("Upstream manifest must contain only root-level filenames")
+        if sha256(root / name) != checksum:
+            raise ValueError(f"Upstream source checksum mismatch: {name}")
+
+
 def cask_text(release_version, checksum):
-    if not re.fullmatch(r"\d+\.\d+\.\d+(?:-beta\.\d+)?", release_version):
-        raise ValueError("Invalid release version")
+    if not re.fullmatch(r"\d+\.\d+\.\d+", release_version):
+        raise ValueError("Casks require a stable release version")
     if not re.fullmatch(r"[a-f0-9]{64}", checksum):
         raise ValueError("Invalid SHA-256")
     return f'''cask "unrar" do
@@ -53,6 +100,8 @@ end
 
 
 def build_info(output):
+    verify_source()
+    provenance = json.loads((ROOT / "upstream.json").read_text())
     files = sorted([*ROOT.glob("*.cpp"), *ROOT.glob("*.hpp"),
                     ROOT / "makefile", ROOT / "license.txt", ROOT / "acknow.txt"])
     sdk = json.loads(Path("/sdk/SDKSettings.json").read_text())
@@ -62,6 +111,7 @@ def build_info(output):
         "compiler": subprocess.check_output(["clang++", "--version"], text=True).strip(),
         "source_sha256": {p.name: sha256(p) for p in files},
         "binary_sha256": sha256(output.parent / "unrar"),
+        "upstream": {key: provenance[key] for key in ("version", "url", "sha256")},
     }
     output.write_text(json.dumps(data, indent=2) + "\n")
 
@@ -94,6 +144,10 @@ def main():
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("version")
     sub.add_parser("check-tag").add_argument("tag")
+    sub.add_parser("verify-source")
+    preflight_parser = sub.add_parser("preflight")
+    preflight_parser.add_argument("stage", choices=REQUIRED_SECRETS)
+    preflight_parser.add_argument("tag")
     sub.add_parser("build-info").add_argument("output", type=Path)
     sub.add_parser("validate-build").add_argument("directory", type=Path)
     metadata = sub.add_parser("package-metadata")
@@ -104,6 +158,10 @@ def main():
         print(version())
     elif args.command == "check-tag":
         print(check_tag(args.tag))
+    elif args.command == "verify-source":
+        verify_source()
+    elif args.command == "preflight":
+        print(preflight(args.stage, args.tag))
     elif args.command == "build-info":
         build_info(args.output)
     elif args.command == "validate-build":

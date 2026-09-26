@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd /src
+python3 scripts/release.py verify-source
 shellcheck scripts/*.sh
 actionlint -color .github/workflows/*.yml
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -v

@@ -9,8 +9,7 @@ void ExtractACL20(Archive &Arc,const std::wstring &FileName)
 {
   SetACLPrivileges();
 
-  constexpr size_t MAX_ACL_SIZE = 0x100000;
-  if (Arc.BrokenHeader || Arc.EAHead.UnpSize>MAX_ACL_SIZE)
+  if (Arc.BrokenHeader)
   {
     uiMsg(UIERROR_ACLBROKEN,Arc.FileName,FileName);
     ErrHandler.SetErrorCode(RARX_CRC);

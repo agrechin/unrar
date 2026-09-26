@@ -3,6 +3,12 @@ set -euo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
 tag=${1:?Usage: publish.sh vVERSION}
 version=$(python3 "$root/scripts/release.py" preflight publish "$tag")
+# A changed label must not publish even though code is pinned to the admitted SHA.
+PYTHONPATH="$root/scripts" python3 - "$tag" "$RELEASE_COMMIT" <<'PY'
+import sys
+from release_policy import require_tag_commit
+require_tag_commit(sys.argv[1], sys.argv[2])
+PY
 dist="$root/.build/release"
 artifact="unrar_${version}_darwin_arm64.dmg"
 repo=agrechin/unrar

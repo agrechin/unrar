@@ -15,7 +15,12 @@
 - Release signing and notarization must fail closed; never strip quarantine.
 - Pull-request CI must never receive signing or publication credentials.
 - Release only stable source (`RARVER_BETA=0`); keep tags aligned with `version.hpp`.
-- Signing and publishing run only in the tag-scoped GitHub Release workflow.
+- Signing and publishing run only in the GitHub Release workflow dispatched from
+  protected main for an authorized tag and immutable commit SHA. Never execute
+  admission code from the candidate tag or resolve tags again for job checkouts.
+- Restrict the release environment to the main branch. Release tag creation is
+  restricted; updates/deletions have no ruleset bypass. Keep tag credentials in
+  the release environment and separate from the built-in workflow token.
 - Prepare release requires a main-branch commit with passing Linux and macOS CI.
   GITHUB_TOKEN-created tags/PRs need explicit workflow dispatch to trigger CI.
 - Preserve published release bytes. Retry only failed publication jobs to finish

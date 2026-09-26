@@ -29,7 +29,10 @@ class ReleaseTests(unittest.TestCase):
     def release_environment(self, stage, tag):
         return {
             "GITHUB_ACTIONS": "true", "GITHUB_REPOSITORY": "agrechin/unrar",
-            "GITHUB_WORKFLOW": "Release", "GITHUB_REF": f"refs/tags/{tag}",
+            "GITHUB_WORKFLOW": "Release", "GITHUB_REF": "refs/heads/main",
+            "GITHUB_EVENT_NAME": "workflow_dispatch", "RELEASE_TAG": tag,
+            "GITHUB_WORKFLOW_REF": "agrechin/unrar/.github/workflows/release.yml@refs/heads/main",
+            "RELEASE_COMMIT": "a" * 40,
             **{name: "test-placeholder" for name in release.REQUIRED_SECRETS[stage]},
         }
 
@@ -58,7 +61,8 @@ class ReleaseTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "stable release version"):
             release.cask_text("7.23.0-beta.1", "a" * 64)
 
-    def test_release_context_and_credentials_fail_closed(self):
+    @patch.object(release.subprocess, "check_output", return_value="a" * 40 + "\n")
+    def test_release_context_and_credentials_fail_closed(self, _head):
         tag = "v7.23.0"
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -73,7 +77,11 @@ class ReleaseTests(unittest.TestCase):
                 for overrides in ({"GITHUB_ACTIONS": "false"},
                                   {"GITHUB_REPOSITORY": "someone/unrar"},
                                   {"GITHUB_WORKFLOW": "CI"},
-                                  {"GITHUB_REF": "refs/heads/main"},
+                                  {"GITHUB_REF": "refs/heads/feature"},
+                                  {"GITHUB_REF": f"refs/tags/{tag}"},
+                                  {"GITHUB_EVENT_NAME": "push"},
+                                  {"RELEASE_TAG": "v0.0.0"},
+                                  {"GITHUB_WORKFLOW_REF": "agrechin/unrar/.github/workflows/release.yml@refs/tags/v7.23.0"},
                                   {"GITHUB_REF": "refs/tags/v0.0.0"}):
                     with self.subTest(stage=stage, context=overrides):
                         with self.assertRaisesRegex(ValueError, "GitHub Release workflow"):
@@ -93,6 +101,17 @@ class ReleaseTests(unittest.TestCase):
             (source / "extra.cpp").touch()
             with self.assertRaisesRegex(ValueError, "Unrecorded upstream"):
                 release.verify_source(root)
+
+    def test_release_requires_authorized_sha_and_matching_checkout(self):
+        env = self.release_environment("sign", "v7.23.0")
+        for commit in ("", "main", "a" * 7, "a" * 40 + "\n"):
+            with self.subTest(commit=commit), patch.object(release.subprocess, "check_output") as git, \
+                    self.assertRaisesRegex(ValueError, "immutable commit"):
+                release.require_release_ci("v7.23.0", {**env, "RELEASE_COMMIT": commit})
+            git.assert_not_called()
+        with patch.object(release.subprocess, "check_output", return_value="b" * 40 + "\n"), \
+                self.assertRaisesRegex(ValueError, "Checkout differs"):
+            release.require_release_ci("v7.23.0", env)
 
     def test_release_entrypoints_reject_local_execution(self):
         scripts = Path(__file__).resolve().parents[1] / "scripts"
@@ -132,11 +151,20 @@ class ReleaseTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             directory = Path(tmp)
             (directory / "unrar").write_bytes(b"changed")
+            for name in ("license.txt", "acknow.txt"):
+                (directory / name).write_bytes((release.ROOT / release.SOURCE_DIR / name).read_bytes())
             (directory / "build-info.json").write_text(json.dumps({
                 "version": release.version(), "architecture": "arm64",
                 "binary_sha256": "0" * 64,
             }))
             with self.assertRaisesRegex(ValueError, "Binary changed"):
+                release.validate_build(directory)
+
+    def test_build_artifact_rejects_symlinked_input(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            (directory / "unrar").symlink_to(release.ROOT / release.SOURCE_DIR / "version.hpp")
+            with self.assertRaisesRegex(ValueError, "regular file: unrar"):
                 release.validate_build(directory)
 
     def test_native_metadata_records_toolchain_and_checks_linked_minimum_os(self):

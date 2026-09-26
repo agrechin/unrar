@@ -4,7 +4,7 @@ FROM ubuntu:26.04@sha256:da6fc2be547864451aa253836dd926da33623312df4a9a243e35dc8
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-       clang-21 llvm-21 make python3 shellcheck ruby ca-certificates \
+       clang-21 llvm-21 make python3 python3-yaml git shellcheck ruby ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=actionlint /usr/local/bin/actionlint /usr/local/bin/actionlint

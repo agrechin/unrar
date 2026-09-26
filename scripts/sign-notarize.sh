@@ -3,16 +3,14 @@ set -euo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
 version=$(python3 "$root/scripts/release.py" preflight sign "${1:?Usage: sign-notarize.sh vVERSION}")
 [[ $(uname -s) == Darwin && $(uname -m) == arm64 ]] || {
-  echo 'Signing and release smoke tests require an Apple Silicon Mac.' >&2; exit 1;
+  echo 'Signing requires an Apple Silicon Mac.' >&2; exit 1;
 }
 python3 "$root/scripts/release.py" validate-build "$root/.build/macos"
 [[ $(lipo -archs "$root/.build/macos/unrar") == arm64 ]] || { echo 'Expected arm64 binary.' >&2; exit 1; }
-python3 "$root/scripts/smoke.py" "$root/.build/macos/unrar"
 
 umask 077
 private=$(mktemp -d "${TMPDIR:-/tmp}/unrar-sign.XXXXXX")
 keychain="$private/signing.keychain-db"
-mountpoint="$private/mounted"
 original_keychains=()
 restore_search_list=false
 set_search_list() {
@@ -26,9 +24,6 @@ set_search_list() {
 cleanup() {
   local result=$?
   trap - EXIT
-  if mount | grep -Fq " on $mountpoint "; then
-    hdiutil detach -quiet "$mountpoint" || true
-  fi
   if [[ $restore_search_list == true ]]; then
     set_search_list || { echo 'Failed to restore the keychain search list.' >&2; result=1; }
   fi
@@ -83,7 +78,6 @@ chmod 755 "$stage/unrar"
 codesign --force --sign "$identity" --keychain "$keychain" --timestamp \
   --options runtime --identifier com.github.agrechin.unrar "$stage/unrar"
 codesign --verify --strict --verbose=2 "$stage/unrar"
-python3 "$root/scripts/smoke.py" "$stage/unrar"
 dmg="$dist/unrar_${version}_darwin_arm64.dmg"
 hdiutil create -quiet -ov -format UDZO -fs HFS+ -volname UnRAR -srcfolder "$stage" "$dmg"
 codesign --sign "$identity" --keychain "$keychain" --timestamp "$dmg"
@@ -106,11 +100,6 @@ PY
 xcrun stapler staple "$dmg"
 xcrun stapler validate "$dmg"
 spctl --assess --type open --context context:primary-signature --verbose=2 "$dmg"
-mkdir "$mountpoint"
-hdiutil attach -quiet -readonly -nobrowse -mountpoint "$mountpoint" "$dmg"
-codesign --verify --strict --verbose=2 "$mountpoint/unrar"
-python3 "$root/scripts/smoke.py" "$mountpoint/unrar"
-hdiutil detach -quiet "$mountpoint"
 cp "$submission" "$dist/notarization.json"
 python3 "$root/scripts/release.py" package-metadata "v$version" "$dist"
 echo "Signed, notarized, and stapled: $dmg"

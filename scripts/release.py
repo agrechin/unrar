@@ -8,7 +8,10 @@ import re
 import subprocess
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+# Credentialed jobs run this controller from the workflow's main snapshot while
+# reading the authorized candidate checkout as data. Local and CI builds use
+# the controller checkout as their source by default.
+ROOT = Path(os.environ["UNRAR_SOURCE_ROOT"]).resolve() if os.environ.get("UNRAR_SOURCE_ROOT") else Path(__file__).resolve().parents[1]
 SOURCE_DIR = Path("vendor/unrar")
 REPOSITORY = "agrechin/unrar"
 MIN_MACOS = "12.0"
@@ -36,20 +39,28 @@ def check_tag(tag, root=ROOT):
     return tag[1:]
 
 
-def require_release_ci(tag, env=None):
+def require_release_ci(tag, env=None, root=ROOT):
     env = os.environ if env is None else env
     expected = {
         "GITHUB_ACTIONS": "true", "GITHUB_REPOSITORY": REPOSITORY,
-        "GITHUB_WORKFLOW": "Release", "GITHUB_REF": f"refs/tags/{tag}",
+        "GITHUB_WORKFLOW": "Release", "GITHUB_REF": "refs/heads/main",
+        "GITHUB_EVENT_NAME": "workflow_dispatch", "RELEASE_TAG": tag,
+        "GITHUB_WORKFLOW_REF": f"{REPOSITORY}/.github/workflows/release.yml@refs/heads/main",
     }
     if any(env.get(key) != value for key, value in expected.items()):
         raise ValueError("Signing and publishing are supported only by this repository's "
-                         "GitHub Release workflow, running on the release tag")
+                         "GitHub Release workflow, dispatched from main for an authorized tag")
+    commit = env.get("RELEASE_COMMIT", "")
+    if not re.fullmatch(r"[a-f0-9]{40}", commit):
+        raise ValueError("Release requires an authorized immutable commit SHA")
+    head = subprocess.check_output(["git", "-C", str(root), "rev-parse", "HEAD"], text=True).strip()
+    if head != commit:
+        raise ValueError("Checkout differs from the authorized release commit")
 
 
 def preflight(stage, tag, root=ROOT, env=None):
     env = os.environ if env is None else env
-    require_release_ci(tag, env)
+    require_release_ci(tag, env, root)
     release_version = check_tag(tag, root)
     verify_source(root)
     missing = [name for name in REQUIRED_SECRETS[stage] if not env.get(name)]
@@ -129,25 +140,32 @@ def build_info(output, root=ROOT):
     output.write_text(json.dumps(data, indent=2) + "\n")
 
 
-def validate_build(directory):
-    verify_source()
+def validate_build(directory, root=ROOT):
+    verify_source(root)
+    for name in ("unrar", "license.txt", "acknow.txt", "build-info.json"):
+        path = directory / name
+        if path.is_symlink() or not path.is_file():
+            raise ValueError(f"Build artifact must contain a regular file: {name}")
     info = json.loads((directory / "build-info.json").read_text())
-    if info["version"] != version() or info["architecture"] != "arm64":
+    if info["version"] != version(root) or info["architecture"] != "arm64":
         raise ValueError("Build version/architecture does not match this source")
     if sha256(directory / "unrar") != info["binary_sha256"]:
         raise ValueError("Binary changed since the native build")
     if info["minimum_macos"] != MIN_MACOS or info["sdk"] != "26.5":
         raise ValueError("Build minimum OS or SDK differs from the release toolchain")
-    expected_files = set(json.loads((ROOT / "upstream.json").read_text())["files"])
+    expected_files = set(json.loads((root / "upstream.json").read_text())["files"])
     if set(info["source_sha256"]) != expected_files:
         raise ValueError("Build source file list differs from this checkout")
     for name, checksum in info["source_sha256"].items():
-        if sha256(ROOT / SOURCE_DIR / name) != checksum:
+        if sha256(root / SOURCE_DIR / name) != checksum:
             raise ValueError(f"Build is stale: {name} changed")
+    for name in ("license.txt", "acknow.txt"):
+        if sha256(directory / name) != sha256(root / SOURCE_DIR / name):
+            raise ValueError(f"Build artifact differs from source: {name}")
 
 
-def package_metadata(tag, directory):
-    release_version = check_tag(tag)
+def package_metadata(tag, directory, root=ROOT):
+    release_version = check_tag(tag, root)
     dmg = directory / f"unrar_{release_version}_darwin_arm64.dmg"
     checksum = sha256(dmg)
     (directory / "checksums.txt").write_text(f"{checksum}  {dmg.name}\n")

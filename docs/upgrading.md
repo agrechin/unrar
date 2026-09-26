@@ -54,13 +54,21 @@ alone is insufficient for release preparation. Normal pushes do not publish.
 In **Actions → Prepare release → Run workflow**, select `main` and enter the
 tested commit SHA. Preparation checks that the commit belongs to `main`, that
 its latest push CI passed both required jobs, and that its upstream source is
-stable and matches the manifest. It creates `v<version>` and starts **Release**
-on that tag. It refuses to move a tag or start over when a release already exists.
+stable and matches the manifest. After environment approval, it creates
+`v<version>` using `RELEASE_TAG_TOKEN` and dispatches **Release** on `main`, passing
+both the tag and full SHA. It refuses to move a tag or start over when a release
+already exists. Missing tag credentials or blocked creation fail closed.
 
 Follow the separately dispatched **Release** run in Actions. Preparation success
 means the release was dispatched, not that publication has finished. Release
-uses the tag-scoped `release` environment, performs signing and notarization on
-a hosted Apple Silicon runner, and publishes from hosted Ubuntu.
+independently authorizes that exact SHA using trusted main code before any
+candidate code runs. Linux checks use the authorized SHA without secrets. The
+native build runs main-snapshot controller scripts against the authorized source
+on a runner without secrets. Signing uses a fresh hosted Apple Silicon runner
+and controller scripts from the workflow's main SHA; it reads the candidate checkout and unsigned
+artifact without executing candidate code. A separate credential-free job tests
+the signed DMG before publication. The main-only `release` environment protects
+signing and publication, which also uses main-snapshot controller scripts.
 
 After Release succeeds, verify the GitHub release and the updated
 [`Casks/unrar.rb`](https://github.com/agrechin/homebrew-tap/blob/main/Casks/unrar.rb).
@@ -69,7 +77,7 @@ Users can then run `brew update` and `brew upgrade --cask agrechin/tap/unrar`.
 ## Recovery and older versions
 
 - Tag created but dispatch failed: rerun preparation for the same SHA, or
-  manually run Release with the tag selected as both workflow ref and input.
+  manually run Release on `main` with the tag and its original full SHA as inputs.
 - Signing/notarization failed before publication: inspect the failing step and
   Apple submission log, correct the cause, and rerun failed jobs.
 - Publication/tap update failed: rerun **only failed jobs in the original Release

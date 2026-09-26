@@ -9,7 +9,7 @@ on:
         type: string
 
 permissions:
-  contents: write
+  contents: read
   actions: write
 
 concurrency:
@@ -20,14 +20,17 @@ jobs:
   prepare:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
+    environment: release
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
+          ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
       - name: Validate tested source, create tag, and start Release
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG_TOKEN: ${{ secrets.RELEASE_TAG_TOKEN }}
           SOURCE_COMMIT: ${{ inputs.commit }}
         run: python3 scripts/prepare-release.py "$SOURCE_COMMIT"

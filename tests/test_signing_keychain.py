@@ -77,6 +77,11 @@ elif tool == 'xcrun' and args[:2] == ['notarytool', 'log']:
 
 
 class SigningKeychainTests(unittest.TestCase):
+    def test_signing_does_not_execute_the_candidate_binary(self):
+        script = (Path(__file__).resolve().parents[1] / 'scripts/sign-notarize.sh').read_text()
+        self.assertNotIn('smoke.py', script)
+        self.assertNotIn('hdiutil attach', script)
+
     def run_script(self, original, failure=''):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)

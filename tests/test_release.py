@@ -15,12 +15,14 @@ spec.loader.exec_module(release)
 
 class ReleaseTests(unittest.TestCase):
     def source_fixture(self, root, beta=0):
-        (root / "version.hpp").write_text(
+        source = root / release.SOURCE_DIR
+        source.mkdir(parents=True)
+        (source / "version.hpp").write_text(
             f"#define RARVER_MAJOR 7\n#define RARVER_MINOR 23\n#define RARVER_BETA {beta}\n")
-        (root / "example.cpp").write_text("// upstream source\n")
+        (source / "example.cpp").write_text("// upstream source\n")
         (root / "upstream.json").write_text(json.dumps({
             "version": release.version(root),
-            "files": {name: release.sha256(root / name) for name in ("version.hpp", "example.cpp")},
+            "files": {name: release.sha256(source / name) for name in ("version.hpp", "example.cpp")},
         }))
 
     def release_environment(self, stage, tag):
@@ -33,8 +35,10 @@ class ReleaseTests(unittest.TestCase):
     def test_beta_and_stable_versions(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            source = root / release.SOURCE_DIR
+            source.mkdir(parents=True)
             for beta, expected in [(1, "7.30.0-beta.1"), (0, "7.30.0")]:
-                (root / "version.hpp").write_text(
+                (source / "version.hpp").write_text(
                     f"#define RARVER_MAJOR 7\n#define RARVER_MINOR 30\n#define RARVER_BETA {beta}\n")
                 self.assertEqual(release.version(root), expected)
 
@@ -79,12 +83,13 @@ class ReleaseTests(unittest.TestCase):
             root = Path(tmp)
             self.source_fixture(root)
             release.verify_source(root)
-            original = (root / "example.cpp").read_bytes()
-            (root / "example.cpp").write_text("// modified source\n")
+            source = root / release.SOURCE_DIR
+            original = (source / "example.cpp").read_bytes()
+            (source / "example.cpp").write_text("// modified source\n")
             with self.assertRaisesRegex(ValueError, "checksum mismatch"):
                 release.verify_source(root)
-            (root / "example.cpp").write_bytes(original)
-            (root / "extra.cpp").touch()
+            (source / "example.cpp").write_bytes(original)
+            (source / "extra.cpp").touch()
             with self.assertRaisesRegex(ValueError, "Unrecorded upstream"):
                 release.verify_source(root)
 

@@ -20,6 +20,19 @@ No release is created by a normal push to `main`.
 Signing, notarization, and publication are supported only through the GitHub
 `Release` workflow. Local commands provide checks and unsigned builds.
 
+## Repository layout
+
+- `vendor/unrar/` — the complete, unmodified RARLAB source, makefile, and licenses.
+- `upstream.json` — upstream URL, archive hash, version, and file hashes relative
+  to `vendor/unrar/`.
+- `scripts/`, `docker/`, `.github/` — our build and release tooling.
+- `tests/` — release-tooling tests and extraction fixtures.
+
+For the next upstream release, follow [the upgrade guide](docs/upgrading.md).
+It includes the import command, validation, tagging, and the current limits on
+multiple-version support. Each tag has its own GitHub release; the Homebrew tap
+currently exposes a single `unrar` cask updated by each publication.
+
 ## Build and test
 
 Host prerequisites: an Apple Silicon Mac, Docker with a running local Linux
@@ -112,8 +125,8 @@ git tag -a v7.23.0 -m 'UnRAR 7.23'
 git push origin v7.23.0
 ```
 
-The tag must match `version.hpp`, and `RARVER_BETA` must be zero. The release
-preflight rejects beta source even if its tag matches. Casks accept stable
+The tag must match `vendor/unrar/version.hpp`, and `RARVER_BETA` must be zero.
+The release preflight rejects beta source even if its tag matches. Casks accept stable
 versions only. A manually dispatched `Release` workflow accepts an existing
 stable tag as well.
 
@@ -158,8 +171,9 @@ that a release is ready.
 
 ## Upstream and licenses
 
-The 159 upstream files, including the `makefile` and licenses, are imported
-without modification from the official [stable source archive](https://www.rarlab.com/rar/unrarsrc-7.2.7.tar.gz).
+The 159 upstream files in [`vendor/unrar/`](vendor/unrar/), including the `makefile`
+and licenses, are imported without modification from the official
+[stable source archive](https://www.rarlab.com/rar/unrarsrc-7.2.7.tar.gz).
 The archive filename is `7.2.7`, while its `version.hpp` declares stable **7.23**.
 [RARLAB's general source link](https://www.rarlab.com/rar_add.htm) can point to a
 beta, so it is not used as an unversioned download source for this repository.
@@ -171,15 +185,14 @@ individual file checksums. The downloaded archive's verified SHA-256 is:
 01d903a7dcf413cb2925696d7796e48e38d471f79bfe7ef3ad2aebf6c12dbefd
 ```
 
-For an upstream update, select an official stable archive, record its URL and
-SHA-256, replace the upstream files exactly (including removing obsolete files),
-and regenerate the file checksums in `upstream.json`. Keep repository tooling
-outside that import. Re-run the Docker checks, macOS build, and extraction tests.
+For an upstream update, use `scripts/import-upstream.py` to replace the complete
+snapshot and regenerate the manifest. Follow the [upgrade guide](docs/upgrading.md)
+for the exact download, import, validation, and publication steps.
 
-UnRAR is source-available freeware governed by [`license.txt`](license.txt),
+UnRAR is source-available freeware governed by [`license.txt`](vendor/unrar/license.txt),
 including its restriction on developing a RAR-compatible archiver or recreating
-RAR compression. It is not MIT-licensed. See [`acknow.txt`](acknow.txt) for included
-components. Extraction fixtures retain their separate libarchive license.
+RAR compression. It is not MIT-licensed. See [`acknow.txt`](vendor/unrar/acknow.txt)
+for included components. Extraction fixtures retain their separate libarchive license.
 
 References: [Clang cross-compilation](https://clang.llvm.org/docs/CrossCompilation.html),
 [Apple notarization](https://developer.apple.com/documentation/security/customizing-the-notarization-workflow),

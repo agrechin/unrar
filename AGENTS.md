@@ -1,8 +1,10 @@
 # Repository guidance
 
-- Keep RARLAB source and its license intact; scope build-tool changes to tooling.
+- Keep RARLAB source and its license intact in `vendor/unrar/`; scope build-tool
+  changes to tooling.
 - Import upstream upgrades exactly from a stable RARLAB archive and update its
-  URL, archive checksum, and file checksums in `upstream.json`.
+  URL, archive checksum, and file checksums in `upstream.json` with
+  `scripts/import-upstream.py`; see `docs/upgrading.md`.
 - `bash scripts/check.sh` is the Docker validation gate. On Apple Silicon also
   run `bash scripts/build.sh` and `python3 scripts/smoke.py .build/macos/unrar`.
 - Builds target macOS arm64 only. SDK 26.5 is intentional: LLVM 21 cannot parse

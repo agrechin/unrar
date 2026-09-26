@@ -13,6 +13,6 @@ PY
 ruby -c /tmp/unrar.rb
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
-cp /src/*.cpp /src/*.hpp /src/makefile "$work/"
+cp -R /src/vendor/unrar/. "$work/"
 make -s -C "$work" -j"$(nproc)" CXX=clang++ STRIP=llvm-strip
 python3 scripts/smoke.py "$work/unrar"

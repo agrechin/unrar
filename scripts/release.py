@@ -9,6 +9,7 @@ import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+SOURCE_DIR = Path("vendor/unrar")
 REPOSITORY = "agrechin/unrar"
 MIN_MACOS = "12.0"
 REQUIRED_SECRETS = {
@@ -20,7 +21,7 @@ REQUIRED_SECRETS = {
 
 def version(root=ROOT):
     values = dict(re.findall(r"^#define RARVER_(MAJOR|MINOR|BETA)\s+(\d+)$",
-                             (root / "version.hpp").read_text(), re.MULTILINE))
+                             (root / SOURCE_DIR / "version.hpp").read_text(), re.MULTILINE))
     major, minor, beta = (int(values[k]) for k in ("MAJOR", "MINOR", "BETA"))
     return f"{major}.{minor}.0" + (f"-beta.{beta}" if beta else "")
 
@@ -66,14 +67,18 @@ def verify_source(root=ROOT):
     if provenance["version"] != version(root):
         raise ValueError("Upstream provenance version does not match version.hpp")
     expected = provenance["files"]
-    # Extra compilation units or headers must not silently enter an upstream build.
-    extra = {p.name for pattern in ("*.cpp", "*.hpp") for p in root.glob(pattern)} - set(expected)
+    source = root / SOURCE_DIR
+    # This directory contains only the complete, unmodified upstream snapshot.
+    extra = {p.name for p in source.iterdir()} - set(expected)
     if extra:
         raise ValueError("Unrecorded upstream source files: " + ", ".join(sorted(extra)))
     for name, checksum in expected.items():
         if Path(name).name != name or name in (".", ".."):
-            raise ValueError("Upstream manifest must contain only root-level filenames")
-        if sha256(root / name) != checksum:
+            raise ValueError("Upstream manifest must contain only filenames relative to vendor/unrar")
+        path = source / name
+        if path.is_symlink() or not path.is_file():
+            raise ValueError(f"Upstream source must be a regular file: {name}")
+        if sha256(path) != checksum:
             raise ValueError(f"Upstream source checksum mismatch: {name}")
 
 
@@ -102,14 +107,13 @@ end
 def build_info(output):
     verify_source()
     provenance = json.loads((ROOT / "upstream.json").read_text())
-    files = sorted([*ROOT.glob("*.cpp"), *ROOT.glob("*.hpp"),
-                    ROOT / "makefile", ROOT / "license.txt", ROOT / "acknow.txt"])
+    source = ROOT / SOURCE_DIR
     sdk = json.loads(Path("/sdk/SDKSettings.json").read_text())
     data = {
         "version": version(), "architecture": "arm64", "minimum_macos": MIN_MACOS,
         "sdk": sdk["Version"] if "Version" in sdk else sdk["CanonicalName"],
         "compiler": subprocess.check_output(["clang++", "--version"], text=True).strip(),
-        "source_sha256": {p.name: sha256(p) for p in files},
+        "source_sha256": {name: sha256(source / name) for name in sorted(provenance["files"])},
         "binary_sha256": sha256(output.parent / "unrar"),
         "upstream": {key: provenance[key] for key in ("version", "url", "sha256")},
     }
@@ -117,17 +121,17 @@ def build_info(output):
 
 
 def validate_build(directory):
+    verify_source()
     info = json.loads((directory / "build-info.json").read_text())
     if info["version"] != version() or info["architecture"] != "arm64":
         raise ValueError("Build version/architecture does not match this source")
     if sha256(directory / "unrar") != info["binary_sha256"]:
         raise ValueError("Binary changed since the Docker build")
-    expected_files = {p.name for p in [*ROOT.glob("*.cpp"), *ROOT.glob("*.hpp"),
-                                     ROOT / "makefile", ROOT / "license.txt", ROOT / "acknow.txt"]}
+    expected_files = set(json.loads((ROOT / "upstream.json").read_text())["files"])
     if set(info["source_sha256"]) != expected_files:
         raise ValueError("Build source file list differs from this checkout")
     for name, checksum in info["source_sha256"].items():
-        if sha256(ROOT / name) != checksum:
+        if sha256(ROOT / SOURCE_DIR / name) != checksum:
             raise ValueError(f"Build is stale: {name} changed")
 
 

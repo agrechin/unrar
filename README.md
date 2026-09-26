@@ -84,7 +84,9 @@ and signing tools run in CI. Never commit SDKs, keys, P12 files, or keychains.
 CI runs without signing secrets. Only Release uses the `release` environment.
 The signing script imports the P12 into a temporary keychain, requires exactly
 one valid Developer ID Application identity, and removes temporary key material
-on exit. Hosted runners are discarded after each job.
+on exit. The temporary keychain is added to the runner's search list for signing;
+the original search list is restored during cleanup, including on failure.
+Hosted runners are discarded after each job.
 
 ## Release and recovery
 

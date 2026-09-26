@@ -13,14 +13,43 @@ umask 077
 private=$(mktemp -d "${TMPDIR:-/tmp}/unrar-sign.XXXXXX")
 keychain="$private/signing.keychain-db"
 mountpoint="$private/mounted"
+original_keychains=()
+restore_search_list=false
+set_search_list() {
+  # Bash 3.2 treats an empty array as unset under nounset.
+  if [[ ${#original_keychains[@]} -gt 0 ]]; then
+    security list-keychains -d user -s "$@" "${original_keychains[@]}"
+  else
+    security list-keychains -d user -s "$@"
+  fi
+}
 cleanup() {
+  local result=$?
+  trap - EXIT
   if mount | grep -Fq " on $mountpoint "; then
     hdiutil detach -quiet "$mountpoint" || true
   fi
+  if [[ $restore_search_list == true ]]; then
+    set_search_list || { echo 'Failed to restore the keychain search list.' >&2; result=1; }
+  fi
   security delete-keychain "$keychain" >/dev/null 2>&1 || true
   rm -rf "$private"
+  exit "$result"
 }
 trap cleanup EXIT
+# Snapshot before creation: creating a keychain can itself change the search list.
+security list-keychains -d user > "$private/search-list.txt"
+python3 - "$private" <<'PY'
+import shlex, sys
+from pathlib import Path
+directory = Path(sys.argv[1])
+paths = shlex.split((directory / 'search-list.txt').read_text())
+(directory / 'search-list.nul').write_bytes(b''.join(path.encode() + b'\0' for path in paths))
+PY
+while IFS= read -r -d '' previous_keychain; do
+  original_keychains+=("$previous_keychain")
+done < "$private/search-list.nul"
+restore_search_list=true
 export UNRAR_PRIVATE_DIR="$private"
 python3 - <<'PY'
 import base64, os
@@ -36,6 +65,9 @@ security set-keychain-settings -lut 7200 "$keychain"
 security unlock-keychain -p "$keychain_password" "$keychain"
 security import "$private/certificate.p12" -k "$keychain" -P "$MACOS_SIGN_PASSWORD" -T /usr/bin/codesign >/dev/null
 security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain" >/dev/null
+# codesign needs the identity and its certificate chain on the user's search list,
+# even when --keychain selects the signing identity explicitly.
+set_search_list "$keychain"
 identity=$(security find-identity -v -p codesigning "$keychain" | awk '/"Developer ID Application:/ {print $2}')
 [[ "$identity" =~ ^[A-Fa-f0-9]{40}$ ]] || { echo 'P12 must contain exactly one valid Developer ID Application identity.' >&2; exit 1; }
 

@@ -2,7 +2,7 @@
 
 No local build tools are required. Each checkout contains one complete upstream
 snapshot in `vendor/unrar/`; older versions remain in Git tags and releases.
-Complete the [one-time GitHub setup](../README.md#one-time-github-setup) first.
+Complete the [one-time GitHub setup](maintaining.md#one-time-github-setup) first.
 
 ## 1. Import a stable upstream archive
 
